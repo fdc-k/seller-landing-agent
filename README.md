@@ -18,6 +18,12 @@ Whatnot 观察台的 Windows / macOS 卖家专属落地程序公开分发仓库�
 
 Windows 需要保持该用户已登录且电脑不休眠；后台任务名称为 `WAO Seller Landing`。macOS 使用该用户的 LaunchAgent。当前不是登录前运行的系统服务。
 
+## Windows 先接通远程配置
+
+如果需要先让管理员通过中转进入 Windows、再完成卖家程序配置，可使用独立的 [SSH 维护引导](support/README.zh-CN.md)。管理员为指定账号发放固定版本并校验 SHA256 的一条命令，运营人员在该卖家电脑上以管理员身份运行 PowerShell，再私下回传脚本输出的公钥与连接报告。
+
+该维护引导不包含 Seller API Token，不注册卖家 API 线路，也不使用工作组共享私钥。Windows SSH 只监听回环地址；单独的后台任务主动连接批准的美国中转。中转登记本机生成的公钥后，管理员仍需核对机器指纹才能登录。此阶段输出的 `pendingRelayAuthorization` 仅表示等待登记，不代表远程连接或 Seller API 已验证成功。
+
 ## 账号隔离
 
 - 观察台加密保存 Personal access token，安装包和安装命令不包含 Token。
