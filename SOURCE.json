@@ -52,5 +52,6 @@
       "path": "services/seller-landing/runtime.test.mjs",
       "sha256": "cdcaaa9bdb89a18d3048cd23b9e3a91ffc9166dde0604658a8ff9b1c82151db9"
     }
-  ]
+  ],
+  "hashNormalization": "UTF-8 with LF line endings"
 }
