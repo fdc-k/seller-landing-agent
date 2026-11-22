@@ -11,3 +11,5 @@ test('supervisor restarts failed children with backoff and cancels on shutdown',
 test('supervisor stops all active children',()=>{const children=[];const stop=supervise([['a',[]],['b',[]]],{launch:()=>{const c=new EventEmitter();c.kill=()=>c.killed=true;children.push(c);return c;}});stop();assert.ok(children.every(x=>x.killed));});
 
 test('VLESS transport only routes the enrolled local TLS gateway and rejects every fallback',()=>{const c=singConfig('uuid','private',22000,29443);assert.deepEqual(c.route.rules,[{network:'tcp',ip_cidr:['127.0.0.1/32'],port:[29443],action:'route',outbound:'direct'},{action:'reject'}]);});
+
+test('country enrollment accepts empty fixed IPs and preserves normalized policy',()=>{const v={...response(),expectedEgressIPs:[],egressPolicy:{mode:'country',country:'UK'}};assert.deepEqual(enrollment(v,'https://central.example').egressPolicy,{mode:'country',country:'GB'});assert.throws(()=>enrollment({...response(),expectedEgressIPs:[]},'https://central.example'));assert.throws(()=>enrollment({...v,egressPolicy:{mode:'country',country:'ZZ'}},'https://central.example'));});

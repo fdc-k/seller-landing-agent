@@ -1,16 +1,16 @@
 {
   "version": 1,
-  "observerCommit": "092eaf26077af5640c574400a1c3a014a4c91b64",
+  "observerCommit": "4aee141d4096e188016d37737ac2b84a58ae3641",
   "distribution": "public-program-only",
-  "dynamicEgressSupported": false,
+  "dynamicEgressSupported": true,
   "files": [
     {
       "path": "services/seller-landing/install.mjs",
-      "sha256": "1400274e10bad7f98224ccb56490450fa4f3071a0a9e76a7e47a1079f90232bc"
+      "sha256": "60dae43a7a7d2da18f9c0177470066bd6c02966325568a38f87a1dbcab8a4965"
     },
     {
       "path": "services/seller-landing/runtime.mjs",
-      "sha256": "0114378d3f39549f7c01c072adfda71a2475acee052c7efd5f732244fc96332d"
+      "sha256": "dd630c20de79c7e79be18bf2599fdf314f33877bfe03df28c26a90440eaefed1"
     },
     {
       "path": "services/seller-landing/supervisor.mjs",
@@ -18,7 +18,7 @@
     },
     {
       "path": "services/seller-landing/gateway.mjs",
-      "sha256": "49225edd1814329cf742fdea2ef00e72fd5d97cd11bbcfaa1752b71a73827ccd"
+      "sha256": "f33e4a722795a0eb5d76e5534d0b91e1299178e423202f79247e14cb96ecbece"
     },
     {
       "path": "services/seller-landing/certificate.mjs",
@@ -50,7 +50,19 @@
     },
     {
       "path": "services/seller-landing/runtime.test.mjs",
-      "sha256": "cdcaaa9bdb89a18d3048cd23b9e3a91ffc9166dde0604658a8ff9b1c82151db9"
+      "sha256": "7912cad4821a5da9081656479595eab3b473db1b345b1cf8e06c8f5a3a792d05"
+    },
+    {
+      "path": "install.ps1",
+      "sha256": "2f907d05f61259f32d327eb2dd365927b0b1ef1123bcbf7c42a26ef1addabce6"
+    },
+    {
+      "path": "install.sh",
+      "sha256": "9da3373938d0e43e3bbeaf7a23df0222a149a6ed040df047b33c0e96a5abccf5"
+    },
+    {
+      "path": "entry-manifest.json",
+      "sha256": "da8072b980f154776e8061b77dd2cf483985326857f31cd92caad4277bf12313"
     }
   ],
   "hashNormalization": "UTF-8 with LF line endings"

@@ -1,6 +1,6 @@
 {
   "name": "seller-landing-agent",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "Public distribution of the account-bound WAO Windows/macOS landing runtime; enrollment remains private.",

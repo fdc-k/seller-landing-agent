@@ -14,17 +14,25 @@ const id=value=>typeof value==='string'&&/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.te
 export const GATEWAY_AUTH_DOMAIN='wao-seller-landing-read-v1';
 const key32=value=>typeof value==='string'&&/^[A-Za-z0-9_-]{43}$/.test(value)&&Buffer.from(value,'base64url').length===32&&Buffer.from(value,'base64url').toString('base64url')===value;
 const parse=body=>{try{return JSON.parse(body);}catch{fail('INVALID_RESPONSE');}};
-const codes=new Set(['INVALID_REQUEST','BINDING_MISMATCH','INVALID_OPERATION','REQUEST_TOO_LARGE','REQUEST_TIMEOUT','UPSTREAM_NETWORK','RESPONSE_TOO_LARGE','INVALID_RESPONSE','EGRESS_MISMATCH','SELLER_ID_MISMATCH','TOKEN_EXPIRED_OR_SCOPE_DENIED','RATE_LIMITED','UPSTREAM_STATUS','SECRET_IN_RESPONSE','REQUEST_REPLAY','BUSY']);
+const codes=new Set(['INVALID_REQUEST','BINDING_MISMATCH','INVALID_OPERATION','REQUEST_TOO_LARGE','REQUEST_TIMEOUT','UPSTREAM_NETWORK','RESPONSE_TOO_LARGE','INVALID_RESPONSE','EGRESS_MISMATCH','EGRESS_COUNTRY_MISMATCH','EGRESS_COUNTRY_UNKNOWN','SELLER_ID_MISMATCH','TOKEN_EXPIRED_OR_SCOPE_DENIED','RATE_LIMITED','UPSTREAM_STATUS','SECRET_IN_RESPONSE','REQUEST_REPLAY','BUSY']);
 
+export function normalizeEgressPolicy(value){
+ if(value===undefined)return undefined;
+ if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).some(k=>!['mode','country'].includes(k))||value.mode!=='country')fail('INVALID_REQUEST');
+ const country=value.country==='UK'?'GB':value.country;
+ if(!['US','GB','FR','DE','AU'].includes(country))fail('INVALID_REQUEST');
+ return Object.freeze({mode:'country',country});
+}
 export function validateGatewayConfig(value){
- if(!value||!['accountId','machineId','sellerId'].every(k=>id(value[k]))||!key32(value.gatewayAuthKey)||!Number.isInteger(value.gatewayPort)||value.gatewayPort<1025||value.gatewayPort>65535||!Array.isArray(value.expectedEgressIPs)||!value.expectedEgressIPs.length||value.expectedEgressIPs.length>16||value.expectedEgressIPs.some(ip=>typeof ip!=='string'||!isIP(ip)))fail('INVALID_REQUEST');
- return Object.freeze({accountId:value.accountId,machineId:value.machineId,sellerId:value.sellerId,gatewayPort:value.gatewayPort,gatewayAuthKey:value.gatewayAuthKey,expectedEgressIPs:Object.freeze([...new Set(value.expectedEgressIPs.map(canonical))])});
+ const egressPolicy=normalizeEgressPolicy(value?.egressPolicy);
+ if(!value||!['accountId','machineId','sellerId'].every(k=>id(value[k]))||!key32(value.gatewayAuthKey)||!Number.isInteger(value.gatewayPort)||value.gatewayPort<1025||value.gatewayPort>65535||!Array.isArray(value.expectedEgressIPs)||(!egressPolicy&&!value.expectedEgressIPs.length)||value.expectedEgressIPs.length>16||value.expectedEgressIPs.some(ip=>typeof ip!=='string'||!isIP(ip)))fail('INVALID_REQUEST');
+ return Object.freeze({accountId:value.accountId,machineId:value.machineId,sellerId:value.sellerId,gatewayPort:value.gatewayPort,gatewayAuthKey:value.gatewayAuthKey,...(egressPolicy?{egressPolicy}:{}),expectedEgressIPs:Object.freeze([...new Set(value.expectedEgressIPs.map(canonical))])});
 }
 
 // Node https.request ignores proxy environment variables. Hosts, paths, method,
 // TLS verification, limits and redirect handling are fixed here, never in input.
 export function directGet(host,path,token,signal){
- if(!['api.ipify.org','api.whatnot.com'].includes(host)||!path.startsWith('/'))return Promise.reject(Object.assign(Error('INVALID_REQUEST'),{code:'INVALID_REQUEST'}));
+ if((token&&host!=='api.whatnot.com')||!['api.ipify.org','api.whatnot.com','api.country.is'].includes(host)||!path.startsWith('/'))return Promise.reject(Object.assign(Error('INVALID_REQUEST'),{code:'INVALID_REQUEST'}));
  return new Promise((resolve,reject)=>{
   const req=request({hostname:host,port:443,path,method:'GET',agent:false,rejectUnauthorized:true,minVersion:'TLSv1.2',signal,headers:{accept:'application/json',...(token?{authorization:`Bearer ${token}`}:{})}},response=>{
    const chunks=[];let size=0;
@@ -44,30 +52,43 @@ export function createGateway(config,{privateKey,get=directGet,now=Date.now}={})
   res.setHeader('connection','close');res.setHeader('cache-control','no-store');res.setHeader('content-type','application/json');
   let acquired=false;
   try{
-   if(req.method!=='POST'||req.url!=='/v1/read'||req.headers['content-type']!=='application/json'||req.headers['content-encoding']||req.headers.expect||!key32(req.headers['x-wao-landing-auth']))fail('INVALID_REQUEST');
+   if(req.method!=='POST'||!['/v1/read','/v1/egress'].includes(req.url)||req.headers['content-type']!=='application/json'||req.headers['content-encoding']||req.headers.expect||!key32(req.headers['x-wao-landing-auth']))fail('INVALID_REQUEST');
    if(active>=8)fail('BUSY');active++;acquired=true;
    const chunks=[];let size=0;
    for await(const chunk of req){size+=chunk.length;if(size>16384)fail('REQUEST_TOO_LARGE');chunks.push(chunk);}
    const bytes=Buffer.concat(chunks),mac=createHmac('sha256',Buffer.from(b.gatewayAuthKey,'base64url')).update(GATEWAY_AUTH_DOMAIN+'\n').update(bytes).digest();
    if(!timingSafeEqual(mac,Buffer.from(req.headers['x-wao-landing-auth'],'base64url')))fail('INVALID_REQUEST');
+   const probe=req.url==='/v1/egress';
    let input;try{input=JSON.parse(bytes.toString('utf8'));}catch{fail('INVALID_REQUEST');}
-   if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).some(k=>!['accountId','machineId','sellerId','operation','args','token','requestId'].includes(k)))fail('INVALID_REQUEST');
+   if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).some(k=>!(probe?['accountId','machineId','sellerId','requestId']:['accountId','machineId','sellerId','operation','args','token','requestId']).includes(k)))fail('INVALID_REQUEST');
    if(input.accountId!==b.accountId||input.machineId!==b.machineId||input.sellerId!==b.sellerId)fail('BINDING_MISMATCH');
-   if(typeof input.requestId!=='string'||!/^[A-Za-z0-9_-]{32,128}$/.test(input.requestId)||typeof input.token!=='string'||input.token.length<1||input.token.length>4096||! /^[A-Za-z0-9._~+\/-]+=*$/.test(input.token))fail('INVALID_REQUEST');
-   const op=buildOperation(input.operation,input.args);
+   if(typeof input.requestId!=='string'||!/^[A-Za-z0-9_-]{32,128}$/.test(input.requestId)||(!probe&&(typeof input.token!=='string'||input.token.length<1||input.token.length>4096||! /^[A-Za-z0-9._~+\/-]+=*$/.test(input.token))))fail('INVALID_REQUEST');
+   const op=probe?undefined:buildOperation(input.operation,input.args);
    if(paused)fail(paused);if(cooldown>now())throw Object.assign(Error('RATE_LIMITED'),{code:'RATE_LIMITED',retryAfterMs:cooldown-now()});
    for(const [nonce,expires]of seen)if(expires<=now())seen.delete(nonce);
    if(seen.has(input.requestId))fail('REQUEST_REPLAY');if(seen.size>=4096)fail('BUSY');seen.set(input.requestId,now()+5*60000);
    const started=now(),requestedAt=new Date(started).toISOString(),controller=new AbortController(),timer=setTimeout(()=>controller.abort(),20000);
    const abort=()=>controller.abort();req.once('aborted',abort);res.once('close',abort);
    try{
-    const ip=await get('api.ipify.org','/?format=json',undefined,controller.signal);check(ip);const egressIp=parse(ip.body)?.ip;
-    if(typeof egressIp!=='string'||!isIP(egressIp)||!b.expectedEgressIPs.includes(canonical(egressIp))){paused='EGRESS_MISMATCH';fail(paused);}
+    const ip=await get('api.ipify.org','/?format=json',undefined,controller.signal);let egressIp;
+    if(b.egressPolicy){if(ip.status<200||ip.status>=300)fail('EGRESS_COUNTRY_UNKNOWN');try{egressIp=JSON.parse(ip.body)?.ip;}catch{fail('EGRESS_COUNTRY_UNKNOWN');}}else{check(ip);egressIp=parse(ip.body)?.ip;}
+    let egressCountry;
+    if(b.egressPolicy){
+     if(typeof egressIp!=='string'||!isIP(egressIp))fail('EGRESS_COUNTRY_UNKNOWN');
+     const geo=await get('api.country.is','/'+encodeURIComponent(egressIp),undefined,controller.signal);
+     if(geo.status<200||geo.status>=300)fail('EGRESS_COUNTRY_UNKNOWN');
+     let evidence;try{evidence=JSON.parse(geo.body);}catch{fail('EGRESS_COUNTRY_UNKNOWN');}
+     if(!evidence||typeof evidence.ip!=='string'||!isIP(evidence.ip)||canonical(evidence.ip)!==canonical(egressIp)||typeof evidence.country!=='string'||! /^[A-Z]{2}$/.test(evidence.country))fail('EGRESS_COUNTRY_UNKNOWN');
+     egressCountry=evidence.country==='UK'?'GB':evidence.country;
+     const regionName=new Intl.DisplayNames(['en'],{type:'region'}).of(egressCountry);if(regionName===egressCountry||regionName==='Unknown Region')fail('EGRESS_COUNTRY_UNKNOWN');
+     if(egressCountry!==b.egressPolicy.country)fail('EGRESS_COUNTRY_MISMATCH');
+    }else if(typeof egressIp!=='string'||!isIP(egressIp)||!b.expectedEgressIPs.includes(canonical(egressIp))){paused='EGRESS_MISMATCH';fail(paused);}
+    if(probe){res.writeHead(200);res.end(JSON.stringify({accountId:b.accountId,machineId:b.machineId,sellerId:b.sellerId,requestId:input.requestId,egressIp,...(egressCountry?{egressCountry}:{})}));return;}
     const identity=await get('api.whatnot.com','/seller-api/rest/v2/users/me',input.token,controller.signal);check(identity);
     if(parse(identity.body)?.id!==b.sellerId){paused='SELLER_ID_MISMATCH';fail(paused);}
     const response=op.path==='/users/me'?identity:await get('api.whatnot.com','/seller-api/rest/v2'+op.path,input.token,controller.signal);check(response);
     if(response.body.includes(input.token)){paused='SECRET_IN_RESPONSE';fail(paused);}
-    const data=parse(response.body);const body=JSON.stringify({accountId:b.accountId,machineId:b.machineId,sellerId:b.sellerId,requestId:input.requestId,data,egressIp,evidence:{requestedAt,durationMs:now()-started,status:response.status,body:response.body}});
+    const data=parse(response.body);const body=JSON.stringify({accountId:b.accountId,machineId:b.machineId,sellerId:b.sellerId,requestId:input.requestId,data,egressIp,...(egressCountry?{egressCountry}:{}),evidence:{requestedAt,durationMs:now()-started,status:response.status,body:response.body}});
     // Also scan wrapper-generated JSON: no echo through any reflected field.
     if(body.includes(input.token)){paused='SECRET_IN_RESPONSE';fail(paused);}res.writeHead(200);res.end(body);
    }finally{clearTimeout(timer);req.off('aborted',abort);res.off('close',abort);input.token='';}

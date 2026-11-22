@@ -7,13 +7,22 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { stageLandingAssets, LANDING_BUNDLE_FILES } from '../scripts/seller-landing-assets.mjs';
 import { renderLandingBootstrap } from '../scripts/seller-landing-bootstrap.mjs';
+import { normalizeEgressPolicy, validateGatewayConfig } from '../services/seller-landing/gateway.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 
+test('country policy permits dynamic IPs while preserving static validation', () => {
+  const binding = {accountId:'fixture-account',machineId:'fixture-machine',sellerId:'fixture-seller',gatewayAuthKey:Buffer.alloc(32,1).toString('base64url'),gatewayPort:29443,expectedEgressIPs:[]};
+  assert.deepEqual(validateGatewayConfig({...binding,egressPolicy:{mode:'country',country:'US'}}).egressPolicy,{mode:'country',country:'US'});
+  assert.deepEqual(normalizeEgressPolicy({mode:'country',country:'UK'}),{mode:'country',country:'GB'});
+  assert.throws(()=>validateGatewayConfig(binding));
+  assert.throws(()=>validateGatewayConfig({...binding,egressPolicy:{mode:'country',country:'ZZ'}}));
+});
+
 test('public snapshot matches its declared source hashes', async () => {
   const source = JSON.parse(await readFile(join(root, 'SOURCE.json'), 'utf8'));
-  assert.equal(source.dynamicEgressSupported, false);
-  assert.equal(source.files.length, 12);
+  assert.equal(source.dynamicEgressSupported, true);
+  assert.equal(source.files.length, 15);
   for (const file of source.files) {
     const bytes = await readFile(join(root, file.path));
     assert.equal(createHash('sha256').update(bytes).digest('hex'), file.sha256, file.path);
