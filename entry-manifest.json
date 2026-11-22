@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "files": {
+    "install.ps1": {
+      "sha256": "2f907d05f61259f32d327eb2dd365927b0b1ef1123bcbf7c42a26ef1addabce6"
+    },
+    "install.sh": {
+      "sha256": "9da3373938d0e43e3bbeaf7a23df0222a149a6ed040df047b33c0e96a5abccf5"
+    }
+  }
+}
