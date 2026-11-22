@@ -120,6 +120,63 @@ function Get-PublicKeyFingerprint([string] $Key) {
     return Get-BytesFingerprint ([Convert]::FromBase64String($Key.Split(' ')[1]))
 }
 
+function Resolve-LocalSupportUser([object[]] $Accounts, [string] $CurrentSid) {
+    # The caller obtains these records with Get-LocalUser -SID, never by a display
+    # name or identity prefix. That lookup also covers Microsoft-connected locals.
+    $records = @($Accounts)
+    if ($records.Count -ne 1 -or $null -eq $records[0]) {
+        throw 'The current Windows SID must resolve to exactly one local user.'
+    }
+    $account = $records[0]
+    foreach ($property in @('SID', 'Enabled', 'Name')) {
+        if ($null -eq $account.PSObject.Properties[$property]) {
+            throw 'The local Windows account record is incomplete.'
+        }
+    }
+    if ([string]$account.SID -cne $CurrentSid -or [string]::IsNullOrEmpty($CurrentSid)) {
+        throw 'The resolved local account SID does not match the current Windows SID.'
+    }
+    if ($account.Enabled -isnot [bool] -or -not $account.Enabled) {
+        throw 'The current local Windows account must be enabled.'
+    }
+    $sourceProperty = $account.PSObject.Properties['PrincipalSource']
+    $source = ''
+    if ($null -ne $sourceProperty) { $source = [string]$sourceProperty.Value }
+    if ($source -notin @('', 'Local', 'MicrosoftAccount')) {
+        throw 'Domain and Microsoft Entra accounts are not supported; use a local Windows account.'
+    }
+    $name = [string]$account.Name
+    # This is a literal OpenSSH AllowUsers token, not a pattern. Permit local
+    # Unicode names, spaces and apostrophes, but no OpenSSH/config metacharacters.
+    if ($name.Length -lt 1 -or $name.Length -gt 20 -or
+        $name -cnotmatch "\A[\p{L}\p{M}\p{Nd}_ .'-]+\z" -or $name -match '\A[ .]+\z') {
+        throw 'Local username must contain only letters, digits, spaces, underscore, period, hyphen or apostrophe; SSH patterns and configuration characters are not supported.'
+    }
+    return $name.ToLowerInvariant()
+}
+
+function Invoke-SupportUtf8Process([string] $FileName, [string] $Arguments) {
+    $start = New-Object Diagnostics.ProcessStartInfo
+    $start.FileName = $FileName
+    $start.Arguments = $Arguments
+    $start.UseShellExecute = $false
+    $start.CreateNoWindow = $true
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $true
+    $start.StandardOutputEncoding = New-Object Text.UTF8Encoding($false)
+    $start.StandardErrorEncoding = New-Object Text.UTF8Encoding($false)
+    $process = [Diagnostics.Process]::Start($start)
+    try {
+        # Drain both pipes concurrently, including when configuration validation fails.
+        $outputTask = $process.StandardOutput.ReadToEndAsync()
+        $errorTask = $process.StandardError.ReadToEndAsync()
+        $process.WaitForExit()
+        return [pscustomobject]@{ ExitCode = $process.ExitCode
+            StandardOutput = $outputTask.GetAwaiter().GetResult()
+            StandardError = $errorTask.GetAwaiter().GetResult() }
+    } finally { $process.Dispose() }
+}
+
 function Assert-OwnedTask($Task, [string] $Name, [string] $Script, [string] $MachineId) {
     if ($null -eq $Task) { return }
     $expectedArgs = '-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + (Join-Path $stateDir $Script) + '"'
@@ -143,7 +200,7 @@ function Read-OwnedState {
         Assert-TrustedAcl $item.FullName
     }
     Assert-TrustedAcl $stateFile
-    $result = Get-Content -LiteralPath $stateFile -Raw | ConvertFrom-Json
+    $result = Get-Content -LiteralPath $stateFile -Raw -Encoding UTF8 | ConvertFrom-Json
     $machineGuid = [guid]::Empty
     if ($result.owner -cne $ownerTag -or $result.schema -ne 1 -or
         -not [guid]::TryParse([string]$result.machineId, [ref]$machineGuid)) {
@@ -218,13 +275,9 @@ if ($LocalPort -eq 22) { throw 'Local support port must be separate from global 
 $RelayHostKey = Normalize-PublicKey $RelayHostKey 'RelayHostKey'
 $AdminPublicKey = Normalize-PublicKey $AdminPublicKey 'AdminPublicKey'
 if ($RelayHostKey -ceq $AdminPublicKey) { throw 'Relay host and controller keys must be independent.' }
-$localAccount = Get-LocalUser -SID $identity.User -ErrorAction Stop
-if ($identity.Name.Split('\')[0] -ine $env:COMPUTERNAME -or
-    $localAccount.PrincipalSource -ne 'Local' -or -not $localAccount.Enabled -or
-    $localAccount.Name -cnotmatch '^[A-Za-z0-9_][A-Za-z0-9_.-]{0,19}$') {
-    throw 'Initially only a local Windows account with a simple ASCII username is supported; domain/Entra/Microsoft accounts are not supported.'
-}
-$localUser = $localAccount.Name.ToLowerInvariant()
+try { $localAccounts = @(Get-LocalUser -SID $identity.User -ErrorAction Stop) }
+catch { throw 'The current Windows SID could not be resolved as a local account. Domain and Microsoft Entra accounts are not supported.' }
+$localUser = Resolve-LocalSupportUser -Accounts $localAccounts -CurrentSid $identity.User.Value
 $binding = [ordered]@{
     accountId = $AccountId; relayHost = $RelayHost; relayPort = $RelayPort; relayUser = $RelayUser
     reversePort = $ReversePort; localPort = $LocalPort; relayHostKey = $RelayHostKey
@@ -376,7 +429,7 @@ AddressFamily inet
 ListenAddress 127.0.0.1
 HostKey "$configDir/host_ed25519"
 AuthorizedKeysFile "$configDir/authorized_keys"
-AllowUsers $localUser
+AllowUsers "$localUser"
 PubkeyAuthentication yes
 PasswordAuthentication no
 AuthenticationMethods publickey
@@ -392,8 +445,11 @@ Subsystem sftp internal-sftp
 Write-PrivateText 'sshd_config' ($sshdConfig + "`n")
 & $sshdExe -t -f $configPath
 if ($LASTEXITCODE -ne 0) { throw 'Isolated sshd configuration validation failed; tasks were not registered.' }
-$effective = @(& $sshdExe -T -f $configPath)
-if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect effective sshd configuration.' }
+# OpenSSH emits UTF-8. Windows PowerShell 5.1 native stdout otherwise follows
+# the console code page, which can corrupt an otherwise valid Unicode username.
+$dump = Invoke-SupportUtf8Process $sshdExe ('-T -f "' + $configPath + '"')
+if ($dump.ExitCode -ne 0) { throw 'Cannot inspect effective sshd configuration.' }
+$effective = @($dump.StandardOutput -split '\r?\n' | Where-Object { $_.Length -gt 0 })
 foreach ($required in @('passwordauthentication no', 'pubkeyauthentication yes', 'authenticationmethods publickey',
     'allowtcpforwarding no', 'allowagentforwarding no', "allowusers $localUser", "listenaddress 127.0.0.1:$LocalPort")) {
     if ($effective -notcontains $required) { throw "Unexpected effective sshd setting: $required" }
@@ -418,7 +474,7 @@ $tunnelScript = @'
 #requires -Version 5.1
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$state = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'state.json') -Raw | ConvertFrom-Json
+$state = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'state.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $b = $state.binding
 $windowsDir = [Environment]::GetFolderPath([Environment+SpecialFolder]::Windows)
 $ssh = Join-Path $windowsDir 'System32\OpenSSH\ssh.exe'

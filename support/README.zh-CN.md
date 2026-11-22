@@ -2,7 +2,7 @@
 
 `windows-ssh.ps1` 是独立的 SSH 支持引导器，供卖家在自己的美国 Windows 电脑上运行。它先生成本机密钥和安全 JSON 回执，再由管理员把回执里的**隧道公钥**登记到固定美国中转。登记之前回执状态始终是 `pendingRelayAuthorization`；启动任务不代表远程已经接通。
 
-需要 Windows 10 1809 / Windows 11、64 位管理员 PowerShell 5.1+，以及当前卖家自己的本地管理员账号。第一版只接受简单 ASCII 本地用户名；域、Entra、Microsoft 联网账号暂不支持。安装 Windows 自带 OpenSSH 可选功能可能需要 Windows Update、较长等待或重启；失败会明确报错，不下载第三方二进制。
+需要 Windows 10 1809 / Windows 11、64 位管理员 PowerShell 5.1+，以及当前卖家自己的本地管理员账号。通过当前 SID 查询并核对本地账号，支持关联 Microsoft 账号的本地用户；不会按登录显示名称或域前缀猜测身份。用户名支持 Unicode 字母、数字、空格、下划线、句点、连字符和单引号，拒绝 SSH 通配符及配置控制字符；域和 Entra 账号仍不支持。安装 Windows 自带 OpenSSH 可选功能可能需要 Windows Update、较长等待或重启；失败会明确报错，不下载第三方二进制。
 
 管理员从固定 Git 提交生成一条命令，先在内存校验脚本 SHA256 再执行，并私下填入这些**公开参数**：
 
@@ -33,3 +33,5 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramData\WAO\Se
 卸载先核验任务归属，停止/注销本工具两个任务，再逐个删除本工具已知文件和专用目录；不递归删除父目录、不卸载 OpenSSH、不改全局 SSH。若进程仍运行，会保留状态并要求重启后重试。管理员还需从中转撤销该机器隧道公钥。相同安装命令可恢复同一绑定；换账号、中转、公钥或端口需先卸载并撤销旧钥。
 
 实现依据：[Microsoft Windows OpenSSH 配置](https://learn.microsoft.com/en-us/windows-server/administration/openssh/openssh-server-configuration)、[Windows OpenSSH 安装前提与可选功能](https://learn.microsoft.com/en-us/windows-server/administration/openssh/openssh_install_firstuse)。使用 `sshd -t` 和 `sshd -T` 校验目标机的实际配置；不使用 Windows 不支持的 `StrictModes`、`X11Forwarding`、`PidFile` 等指令。静态语法/审查通过不代表已经在真实卖家机器完成安装或连通测试。
+
+账号解析的离线回归测试：在仓库根目录运行 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File test/windows-support-identity.test.ps1`。测试从语法树提取账号校验与 UTF8 读取函数，使用模拟账号记录和无害 PowerShell 子进程验证 Unicode 输出及双管道读取；不执行引导器、不安装功能、不启动任务或 sshd。
