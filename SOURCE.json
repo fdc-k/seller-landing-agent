@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "observerCommit": "092eaf26077af5640c574400a1c3a014a4c91b64",
+  "distribution": "public-program-only",
+  "dynamicEgressSupported": false,
+  "files": [
+    {
+      "path": "services/seller-landing/install.mjs",
+      "sha256": "1400274e10bad7f98224ccb56490450fa4f3071a0a9e76a7e47a1079f90232bc"
+    },
+    {
+      "path": "services/seller-landing/runtime.mjs",
+      "sha256": "0114378d3f39549f7c01c072adfda71a2475acee052c7efd5f732244fc96332d"
+    },
+    {
+      "path": "services/seller-landing/supervisor.mjs",
+      "sha256": "c8be995b3fa60aa4ee522a52ad2decbcb3d3c6ef41980a1cb474e0a7ad5a95b7"
+    },
+    {
+      "path": "services/seller-landing/gateway.mjs",
+      "sha256": "49225edd1814329cf742fdea2ef00e72fd5d97cd11bbcfaa1752b71a73827ccd"
+    },
+    {
+      "path": "services/seller-landing/certificate.mjs",
+      "sha256": "f8e686f0dd3309421fb5353d1e986a4da74018e10ef51f203071094e4b81bc72"
+    },
+    {
+      "path": "services/seller-landing/operations.mjs",
+      "sha256": "52676d351c7fd882260004814e6caa660e0bd26ec433ad1e9ed60499565b1b2b"
+    },
+    {
+      "path": "services/seller-machine-info/reporter.mjs",
+      "sha256": "1aefa4dd8ce5a6cccc813138006f2945be32bb0fdeba60825c66592f18f68332"
+    },
+    {
+      "path": "services/seller-machine-info/lib/envelope.mjs",
+      "sha256": "9ccd343cc705cf5f4a29001941d05bc641176b489d2e8210d072f6a655fd369e"
+    },
+    {
+      "path": "services/seller-machine-info/lib/machine-info.mjs",
+      "sha256": "5eb47a95ae246c79bafcf05acdb2bb079434a725f83bc1452411bc8824e20e84"
+    },
+    {
+      "path": "scripts/seller-landing-assets.mjs",
+      "sha256": "f4944c54e67651567284e795c9c5658836d1b6f92423177cfd660ab260a1b891"
+    },
+    {
+      "path": "scripts/seller-landing-bootstrap.mjs",
+      "sha256": "e9139b34eef592c9179b86a7be5756d0d13f6e95443ed62cb3099f823df3127f"
+    },
+    {
+      "path": "services/seller-landing/runtime.test.mjs",
+      "sha256": "cdcaaa9bdb89a18d3048cd23b9e3a91ffc9166dde0604658a8ff9b1c82151db9"
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "name": "seller-landing-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Public distribution of the account-bound WAO Windows/macOS landing runtime; enrollment remains private.",
+  "engines": {
+    "node": ">=22.23.3"
+  },
+  "scripts": {
+    "test": "node --test services/seller-landing/runtime.test.mjs test/public-bundle.test.mjs"
+  }
+}

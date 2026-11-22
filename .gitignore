@@ -1,0 +1,16 @@
+node_modules/
+private/
+state/
+cache/
+bin/
+*.pem
+*.key
+.env*
+bootstrap*.json
+install-state.json
+binding.json
+runtime.json
+gateway.json
+sing-box.json
+commands*.json
+plan*.json
