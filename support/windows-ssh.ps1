@@ -177,6 +177,67 @@ function Invoke-SupportUtf8Process([string] $FileName, [string] $Arguments) {
     } finally { $process.Dispose() }
 }
 
+function Ensure-SupportOpenSshCapabilities([ref] $InstallAttempted) {
+    $featureNames = @('OpenSSH.Client~~~~0.0.1.0', 'OpenSSH.Server~~~~0.0.1.0')
+    $pendingStates = @('InstallPending', 'UninstallPending', 'RemovePending')
+
+    function Read-SupportCapability([string] $Name) {
+        Write-Host ("[WAO support] Checking Windows capability: " + $Name)
+        $records = @(Get-WindowsCapability -Online -Name $Name -ErrorAction Stop)
+        if ($records.Count -ne 1 -or $null -eq $records[0] -or
+            $null -eq $records[0].PSObject.Properties['Name'] -or $records[0].Name -cne $Name -or
+            $null -eq $records[0].PSObject.Properties['State']) {
+            throw "Cannot resolve the exact Windows capability '$Name'; support setup has stopped."
+        }
+        return $records[0]
+    }
+
+    function Assert-SupportCapabilityState($Capability) {
+        $state = [string]$Capability.State
+        if ($pendingStates -contains $state) {
+            throw "Windows capability '$($Capability.Name)' is '$state'. Restart Windows manually, then rerun the same support command. If it remains pending, inspect Windows servicing (CBS); support setup has stopped."
+        }
+        if ($state -notin @('Installed', 'NotPresent')) {
+            throw "Windows capability '$($Capability.Name)' has unsupported state '$state'. Inspect Windows servicing before retrying; support setup has stopped."
+        }
+    }
+
+    # Collect BOTH records before validating or installing either capability. A
+    # pending server must prevent installing a currently absent client as well.
+    $snapshot = @{}
+    foreach ($name in $featureNames) { $snapshot[$name] = Read-SupportCapability $name }
+    foreach ($name in $featureNames) { Assert-SupportCapabilityState $snapshot[$name] }
+    foreach ($name in $featureNames) {
+        if ([string]$snapshot[$name].State -eq 'Installed') { continue }
+        # Servicing state can change after the initial snapshot; never use a
+        # stale NotPresent record to install an already-pending capability.
+        $current = Read-SupportCapability $name
+        Assert-SupportCapabilityState $current
+        if ([string]$current.State -eq 'Installed') { continue }
+        Write-Host ("[WAO support] Installing " + $name + '; Windows Update may take several minutes. Keep this window open.')
+        $InstallAttempted.Value = $true
+        $previousProgress = $ProgressPreference
+        try {
+            $ProgressPreference = 'Continue'
+            $installation = Add-WindowsCapability -Online -Name $name -ErrorAction Stop
+        } finally { $ProgressPreference = $previousProgress }
+        # Query again even when DISM says RestartNeeded=false. In particular,
+        # InstallPending is not a usable installation and sshd.exe may be absent.
+        $after = Read-SupportCapability $name
+        $afterState = [string]$after.State
+        if ($null -eq $installation -or $null -eq $installation.PSObject.Properties['RestartNeeded'] -or
+            $installation.RestartNeeded -isnot [bool]) {
+            throw "Windows capability '$name' is '$afterState', but installation returned no reliable restart result; support setup has stopped."
+        }
+        if ($installation.RestartNeeded -or $pendingStates -contains $afterState) {
+            throw "Windows capability '$name' is '$afterState' (RestartNeeded=$($installation.RestartNeeded)). Restart Windows manually, then rerun the same support command. If it remains pending, inspect Windows servicing (CBS); support setup has stopped."
+        }
+        if ($afterState -ne 'Installed') {
+            throw "Windows capability '$name' is '$afterState' after installation; expected 'Installed'. Inspect Windows servicing before retrying; support setup has stopped."
+        }
+    }
+}
+
 function Assert-OwnedTask($Task, [string] $Name, [string] $Script, [string] $MachineId) {
     if ($null -eq $Task) { return }
     $expectedArgs = '-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + (Join-Path $stateDir $Script) + '"'
@@ -337,6 +398,7 @@ foreach ($listener in $listenersBefore) {
 # Windows capability installation may create a default port-22 rule. Restore its absence
 # if and only if this invocation introduced it; never alter a preexisting firewall rule.
 $firewallBefore = @(Get-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -ErrorAction SilentlyContinue)
+$capabilityInstallAttempted = $false
 $serviceBefore = Get-CimInstance Win32_Service -Filter "Name = 'sshd'"
 $globalConfig = Join-Path $programData 'ssh\sshd_config'
 $globalConfigHash = $null
@@ -344,15 +406,9 @@ if (Test-Path -LiteralPath $globalConfig -PathType Leaf) {
     $globalConfigHash = (Get-FileHash -LiteralPath $globalConfig -Algorithm SHA256).Hash
 }
 try {
-    foreach ($feature in @('OpenSSH.Client~~~~0.0.1.0', 'OpenSSH.Server~~~~0.0.1.0')) {
-        $capability = Get-WindowsCapability -Online -Name $feature
-        if ($capability.State -ne 'Installed') {
-            $installation = Add-WindowsCapability -Online -Name $feature
-            if ($installation.RestartNeeded) { throw 'OpenSSH capability installation requires a restart. Restart Windows and rerun the same command.' }
-        }
-    }
+    Ensure-SupportOpenSshCapabilities -InstallAttempted ([ref]$capabilityInstallAttempted)
 } finally {
-    if ($firewallBefore.Count -eq 0) {
+    if ($capabilityInstallAttempted -and $firewallBefore.Count -eq 0) {
         Get-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -ErrorAction SilentlyContinue | Remove-NetFirewallRule
     }
 }
@@ -372,8 +428,12 @@ foreach ($before in $firewallBefore) {
         throw 'Windows servicing unexpectedly changed a preexisting global SSH firewall rule. Support has not started.'
     }
 }
-foreach ($executable in @($sshdExe, $sshExe, $keygenExe)) {
-    if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) { throw 'Windows OpenSSH installation is incomplete; no fallback binary is downloaded.' }
+$missingExecutables = @(@($sshdExe, $sshExe, $keygenExe) | Where-Object {
+    -not (Test-Path -LiteralPath $_ -PathType Leaf)
+})
+if ($missingExecutables.Count -gt 0) {
+    throw ("Windows OpenSSH capabilities report Installed, but these executable paths are missing: " +
+        ($missingExecutables -join ', ') + '. Inspect Windows servicing; support setup has stopped without a fallback download.')
 }
 
 function Ensure-Key([string] $Name) {
